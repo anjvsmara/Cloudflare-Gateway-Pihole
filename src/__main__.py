@@ -79,6 +79,32 @@ class CloudflareManager:
             self.cache["rules"] = [r for r in self.cache["rules"] if r["id"] != rule["id"]]
             utils.save_cache(self.cache)
 
+    def _delete_by_prefix(self, list_name_prefix, rule_name):
+        # 1. Delete the corresponding rule
+        self._delete_rule_by_name(rule_name)
+
+        # 2. Get a list of lists by prefix and delete each list individually on Cloudflare.
+        current_lists = utils.get_current_lists(self.cache, list_name_prefix)
+        for lst in current_lists:
+            try:
+                delete_list(lst["id"])
+                info(f"[−] Deleted list: {lst['name']}")
+            except NotFoundException:
+                silent_error(f"[·] List {lst['name']} already gone on Cloudflare — skipping")
+            
+            # Update the cache after deleting the list.
+            self.cache["lists"] = [l for l in self.cache.get("lists", []) if l["id"] != lst["id"]]
+            if "mapping" in self.cache:
+                self.cache["mapping"].pop(lst["id"], None)
+            utils.save_cache(self.cache)
+
+        # 3. Clear the state cache of the domain prefix.
+        if hasattr(utils, "clear_cached_domain_state"):
+            utils.clear_cached_domain_state(self.cache, list_name_prefix)
+        if hasattr(utils, "clear_cached_reverse_mapping"):
+            utils.clear_cached_reverse_mapping(self.cache, list_name_prefix)
+        utils.save_cache(self.cache)
+
     def _sync_lists(self, domains, list_name_prefix, rule_name, rule_action, rule_priority,
                      sni_rule_name=None):
         # --- Fast path: skip entire sync when domain set is unchanged ---
